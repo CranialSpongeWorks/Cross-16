@@ -1,0 +1,496 @@
+ 0000           CPU "Z80.TBL"
+ 0000           HOF "INT8"
+;Written by D.Boyce PCBoardRepair on YouTube email:pcboardrepair@gmail.com
+                ;**********************************************************
+                ; Z80A PLUS MICRO CONTROLLER PCB
+                ; 8K OF PROGRAM ROM     LOCATED AT 0000H TO 1FFFH
+                ; 16K OF USER DATA               - 2000H TO 3FFFH AND 4000H TO 5FFFH
+                ; 8K OF CMOS STATIC RAM          - 6000H TO 7FFFH
+                ; 32 KEY KEYBOARD
+                ; LCD OUT COMPATIABLE WITH 
+                ; 48 I/O DATA LINES     6 PLUGS  8Bit WIDE
+                ;  8 ANALOG INPUTS      8 BIT RESOLUTION
+                ;  8 LOCATION EXPANSION I/O SOCKET
+                ;
+                ;**********************************************************
+                ;EQUATES
+                ;SYSTEM DEFINITIONS
+ 8000 =         STACK:    EQU   8000H                  ;LOCATION OF STACK POINTER AT TOP OF RAM
+ 6000 =         RAM:      EQU   6000H                  ;START OF RAM   8K TOTAL  
+ 617F =         RAMTEST:  EQU   617FH                  ;RAM TEST LOCATION
+ 001E =         BEEPTIME: EQU   30D                    ;BEEP ON TIME
+                ;PIO 8255A #1 KEY PAD / DISPLAY PORTS
+ 0000 =         KEYIN:    EQU   00H                    ;KEY INPUT
+ 0001 =         LCDDATA:  EQU   01H                    ;LCD DATA OUTPUTS
+ 0002 =         LCDCHIP:  EQU   02H                    ;LCD CHIP CONTROL LINES
+ 0002 =         SCAN:     EQU   02H                    ;KEY SCAN OUTPUTS
+ 0003 =         PIO1CW:   EQU   03H                    ;PIO 8255A #1 CONTROL WORD
+ 0090 =         CW1:      EQU   90H                    ;SETUP VALUE
+                ;PIO 8255A #2 PORT PLUG #1 TO #3
+ 0008 =         PLUG1:    EQU   08H                    ;PIO 8255A #2 PORT A
+ 000A =         PLUG2:    EQU   0AH                    ;PIO 8255A #2 PORT C
+ 0009 =         PLUG3:    EQU   09H                    ;PIO 8255A #2 PORT B
+ 000B =         PIO2CW:   EQU   0BH                    ;PIO 8255A #2 CONTROL WORD
+ 0080 =         CW2:      EQU   80H                    ;SETUP VALUE
+                ;PIO 8255A #3 PORT PLUG #4 TO #6
+ 0010 =         PLUG4:    EQU   10H                    ;PIO 8255A #3 PORT A
+ 0012 =         PLUG5:    EQU   12H                    ;PIO 8255A #3 PORT C
+ 0011 =         PLUG6:    EQU   11H                    ;PIO 8255A #3 PORT B
+ 0013 =         PIO3CW:   EQU   13H                    ;PIO 8255A #3 CONTROL WORD
+ 0080 =         CW3:      EQU   80H                    ;SETUP VALUE
+                ;A/D CONVERTOR   8 CHANNELS
+ 0018 =         ADCADDR:  EQU   18H                    ;8 BIT A/D CH. 1-8  WR/START RD/DATA
+                ;EXPANSION SOCKET / DIAGNOSTICS
+ 0020 =         EXPAND:   EQU   20H                    ;EXPANSION   0-7 RD/WR 8BIT PORT
+                ;
+                ;RAM BREAKDOWN
+ 6000 =         CLOCK:    EQU   RAM                    ;CLOCK TICK
+ 6001 =         BINARY:   EQU   CLOCK+1                ;BINARY DATA
+ 6002 =         BCDDATA:  EQU   BINARY+1               ;BCD DATA BYTES  (3)
+ 6005 =         ASCDATA:  EQU   BCDDATA+3              ;ASCII DATA BYTES (3)
+ 6008 =         LCDSCAN:  EQU   ASCDATA+3              ;LCD KEY SCAN 0-3 LCD  4-7 LCD
+ 6009 =         KEYDATA:  EQU   LCDSCAN+1              ;KEYDATA ON EXIT OF KEYSCAN
+ 600A =         DIGNUM:   EQU   KEYDATA+1              ;LCD DIGIT NUMBER
+ 600B =         LCDBUFF:  EQU   DIGNUM+1               ;LCD BUFFER 40 BYTES
+ 6033 =         USERRAM:  EQU   LCDBUFF+40             ;USER RAM START
+                ;EPROM 0000H -RESET VECTOR LOCATION
+ 0000                     ORG   0000H                  ;START OF EPROM 0
+ 0000 C30001              JP    RESET                  ;RESET VECTOR
+                ;SUBROUTINE VECTOR
+ 0003 C30004    DELAY:    JP    DELAYS
+ 0006 C30E04    BINBCD:   JP    BINBCDS
+ 0009 C34104    BCDASC:   JP    BCDASCS
+ 000C C35E04    KEYSCAN:  JP    KEYSCANS
+ 000F C3A004    LCDINIT:  JP    LCDINITS
+ 0012 C3C004    LCDCTRL:  JP    LCDCTRLS
+ 0015 C3DF04    LCDCHAR:  JP    LCDCHARS
+ 0018 C30505    LCDHOME:  JP    LCDHOMES    
+ 001B C30B05    BEEP:     JP    BEEPS
+ 001E C32805    DISPLAY:  JP    DISPLAYS
+ 0021 C34705    MESSAGE:  JP    DISPMESS
+ 0024 C9                  RET
+                
+ 0038                     ORG   0038H 
+                ;EPROM 003H -RESTART LOCATION
+ 0038 C9                  RET
+                
+                ;EPROM 0066H -NMI VECTOR LOCATION
+ 0066                     ORG   0066H
+ 0066 C30003              JP    NMIHAND                ;GO PROCESS NMI
+                
+                ;
+                ;INITIALIZE ALL SYSTEM COMPONENTS
+                ;INITIALIZE STACK
+ 0100                     ORG   0100H                  ;
+ 0100 310080    RESET:    LD    SP,#STACK
+ 0103 F3        INTOFF:   DI                           ;DISABLE INTERRUPT
+ 0104 217F61    TESTRAM:  LD    HL,#RAMTEST            ;LOAD LOCATION FOR RAM TEST
+ 0107 3E55                LD    A,#01010101B           ;LOAD #55H
+ 0109 77                  LD    (HL),A                 ;WRITE TO LOCATION
+ 010A 00                  NOP                          ;WAIT
+ 010B 00                  NOP                          ;
+ 010C 7E                  LD    A,(HL)                 ;LOAD DATA FROM LOCATION
+ 010D FE55                CP    #01010101B             ;TEST FOR CORRECT DATA
+ 010F C22001              JP    NZ,RAMFAIL             ;RAM TEST HAS FAILED
+ 0112 3EAA                LD    A,#10101010B           ;LOAD #AAH
+ 0114 77                  LD    (HL),A                 ;WRITE TO LOCATION
+ 0115 00                  NOP                          ;WAIT
+ 0116 00                  NOP                          ;
+ 0117 7E                  LD    A,(HL)                 ;LOAD DATA FROM LOCATION
+ 0118 FEAA                CP    #10101010B             ;TEST FOR CORRECT DATA
+ 011A C22001              JP    NZ,RAMFAIL             ;RAM TEST HAS FAILED
+ 011D C32401              JP    LOADRAM                ;CONTINUE TEST PASSED
+ 0120 76        RAMFAIL:  HALT                         ;HALT
+ 0121 C32001              JP    RAMFAIL                ;LOOP HERE
+                ;LOAD RAM DEFAULTS
+ 0124 =         LOADRAM:  EQU   $
+ 0124 218001              LD    HL,#DEFAULTS           ;LOAD ROM START
+ 0127 110060              LD    DE,#RAM                ;RAM VARIABLES
+ 012A 011900              LD    BC,#DEFNUM             ;LOAD SIZE FOR DEFAULT DATA
+ 012D EDB0                LDIR                         ;TRANSFER
+                ;INIT I/O DEVICES
+ 012F 3E90      INITPIO:  LD    A,#CW1                 ;LOAD CONTROL WORD FOR 8255
+ 0131 D303                OUT   (PIO1CW),A             ;SET UP IO
+ 0133 3E80                LD    A,#CW2                 ;LOAD CONTROL WORD FOR 8255
+ 0135 D30B                OUT   (PIO2CW),A             ;SET UP IO
+ 0137 3E80                LD    A,#CW3                 ;LOAD CONTROL WORD FOR 8255
+ 0139 D313                OUT   (PIO3CW),A             ;SET UP IO
+ 013B AF                  XOR   A                      ;CLEAR A
+ 013C D308                OUT   (PLUG1),A              ;ZERO ALL LINES
+ 013E D30A                OUT   (PLUG2),A              ;
+ 0140 D309                OUT   (PLUG3),A              ;
+ 0142 D310                OUT   (PLUG4),A              ;
+ 0144 D312                OUT   (PLUG5),A              ;
+ 0146 D311                OUT   (PLUG6),A              ;
+                ;EXERCISE ADC
+ 0148 D318      ADCTEST:  OUT   (ADCADDR),A            ;START CONVERSION
+ 014A 00                  NOP                          ;WAIT
+ 014B 00                  NOP                          ;
+ 014C DB18                IN    A,(ADCADDR)            ;GET RESULT
+                ;EXIT TO REAL WORLD FUNCTIONS
+ 014E CD1B00              CALL  BEEP                   ;BEEP ONCE
+ 0151 CD0F00              CALL  LCDINIT                ;INITIALIZE LCD DISPLAY
+ 0154 3E01                LD    A,#01H                 ;DISPLAY OPENING MESSAGE #1
+ 0156 CD2100              CALL  MESSAGE                ;
+ 0159 218813              LD    HL,#5000D              ;DELAY 1 SEC.
+ 015C CD0300              CALL  DELAY                  ;
+ 015F C30002              JP    START                  ;GO FOR PROGRAM
+                ;
+                ;EPROM DEFAULT VALUES FOR RAM INITIZATION
+ 0180                     ORG   0180H
+ 0180 =         DEFAULTS: EQU   $                      ;EXPLAIN DEFAULT REFERENCES HERE
+ 0180 00                  DFB   00H                    ;
+ 0181 00                  DFB   00H                    ;
+ 0182 00                  DFB   00H                    ;
+ 0183 00                  DFB   00H                    ;
+ 0184 00                  DFB   00H                    ;
+ 0185 00                  DFB   00H                    ;
+ 0186 00                  DFB   00H                    ;
+ 0187 00                  DFB   00H                    ;
+ 0188 00                  DFB   00H                    ;
+ 0189 00                  DFB   00H                    ;
+ 018A 00                  DFB   00H                    ;
+ 018B 00                  DFB   00H                    ;
+ 018C 00                  DFB   00H                    ;
+ 018D 00                  DFB   00H                    ;
+ 018E 00                  DFB   00H                    ;
+ 018F 00                  DFB   00H                    ;
+ 0190 00                  DFB   00H                    ;
+ 0191 00                  DFB   00H                    ;
+ 0192 00                  DFB   00H                    ;
+ 0193 00                  DFB   00H                    ;
+ 0194 00                  DFB   00H                    ;
+ 0195 00                  DFB   00H                    ;
+ 0196 00                  DFB   00H                    ;
+ 0197 00                  DFB   00H                    ;
+ 0198 00                  DFB   00H                    ;
+ 0019 =         DEFNUM:   EQU   $-DEFAULTS
+ 0200                     ORG   0200H                  ;PROGRAM LOCATION 0200H-02FFH
+                ;
+ 0200 =         START:    EQU   $
+ 0200 3E02                LD    A,#2D                  ;DISPLAY MESSAGE 2
+ 0202 CD2100              CALL  MESSAGE                ;
+ 0205 CD0C00    PROG00:   CALL  KEYSCAN
+ 0208 3A0960              LD    A,(KEYDATA)
+ 020B D308                OUT   (PLUG1),A
+ 020D 3A0960              LD    A,(KEYDATA)
+ 0210 B7                  OR    A
+ 0211 2820                JR    Z,PROG01 
+ 0213 CD2100              CALL  MESSAGE   
+ 0216 3A0960              LD    A,(KEYDATA)
+ 0219 CD0600              CALL  BINBCD
+ 021C CD0900              CALL  BCDASC
+ 021F 210560              LD    HL,#ASCDATA
+ 0222 112F60              LD    DE,#LCDBUFF+36
+ 0225 010300              LD    BC,#3D
+ 0228 EDB0                LDIR
+ 022A 3A0960              LD    A,(KEYDATA)
+ 022D 321F60              LD    (LCDBUFF+20),A
+ 0230 CD1E00              CALL  DISPLAY
+ 0233 21F401    PROG01:   LD    HL,#500D 
+ 0236 CD0300              CALL  DELAY
+ 0239 18CA                JR    PROG00
+                
+                
+                ;NMI INTERRUPT HANDLER
+ 0300                     ORG   0300H                  ;NMI PROGRAM LOCATION 0300H-03FFH
+                ;
+ 0300 =         NMIHAND:  EQU   $
+ 0300 ED4D                RETI
+                ;
+                ;SUBROUTINES
+ 0400                     ORG   0400H
+                ;*
+                ; DELAY
+                ;LOAD HL WITH # OF MILLISECONDS DELAY
+                ;CALL DELAY
+ 0400 =         DELAYS:   EQU   $
+ 0400 11FFFF              LD    DE,#-1D                ;DECREMENT VALUE
+ 0403 064A      DEL05:    LD    B,#04AH                ;FINAGLE FACTOR
+ 0405 19                  ADD   HL,DE                  ;DEC HL COUNT
+ 0406 D0                  RET   NC                     ;RETURN IF DONE
+ 0407 10FE      DEL10:    DJNZ  DEL10                  ;INNER DELAY LOOP
+ 0409 FD2B                DEC   IY                     ;WASTE TIME
+ 040B C30304              JP    DEL05                  ;RETURN TO OUTER LOOP
+                ; 
+                ; BINARY TO BCD DATA CONVERT
+                ; LOAD A WITH BINARY DATA  THEN CALL  
+                ;
+ 040E =         BINBCDS:  EQU   $
+ 040E 320160              LD    (BINARY),A             ;SAVE
+ 0411 2600                LD    H,#00H                 ;SET UP POINTER
+ 0413 6F                  LD    L,A                    ;
+ 0414 DD210260            LD    IX,#BCDDATA            ;BCD DATA BUFFER
+ 0418 FD213904            LD    IY,#BTABL              ;TABLE OF CONSTANTS
+ 041C 06FF      BIN05:    LD    B,#0FFH                ;INIT BCD DIGIT
+ 041E FD5E00              LD    E,(IY+0)               ;GET POWER OF TEN
+ 0421 FD5601              LD    D,(IY+1)               ;MS BYTE
+ 0424 CB7A                BIT   7,D                    ;TEST SIGN BIT
+ 0426 C0                  RET   NZ                     ;RETURN IF DONE
+ 0427 04        BIN10:    INC   B                      ;BUMP BYTE COUNT
+ 0428 B7                  OR    A                      ;CLEAR CARRY
+ 0429 ED52                SBC   HL,DE                  ;SUBTRACT POWER
+ 042B 30FA                JR    NC,BIN10               ;CONTINUE IF POSITIVE
+ 042D 19                  ADD   HL,DE                  ;RESTORE RESIDUE
+ 042E DD7000              LD    (IX+0),B               ;STORE DIGIT
+ 0431 DD23                INC   IX                     ;BUMP POINTERS
+ 0433 FD23                INC   IY                     ;
+ 0435 FD23                INC   IY                     ;
+ 0437 18E3                JR    BIN05                  ;CONTINUE
+ 0439 6400      BTABL:    DWL   100D                   ;TABLE OF POWERS
+ 043B 0A00                DWL   10D                    ;
+ 043D 0100                DWL   1D                     ;
+ 043F FFFF                DWL   -1D                    ;END OF TABLE
+                ; 
+                ; BCD DATA TO ASCII CHAR CONVERT
+                ; CONVERTS WHAT IN BCDDATA BUFFER TO ASCDATA BUFFER
+                ;
+ 0441 =         BCDASCS:  EQU   $
+ 0441 210260              LD    HL,#BCDDATA           ;POINT TO BCD
+ 0444 110560              LD    DE,#ASCDATA           ;POINT TO ASCII
+ 0447 7E                  LD    A,(HL)                ;LOAD FIRST BYTE
+ 0448 E60F                AND   #00001111B            ;
+ 044A F630                OR    #00110000B            ;
+ 044C 12                  LD    (DE),A                ;SAVE
+ 044D 23                  INC   HL                    ;ADJUST POINTERS
+ 044E 13                  INC   DE                    ;
+ 044F 7E                  LD    A,(HL)                ;LOAD FIRST BYTE
+ 0450 E60F                AND   #00001111B            ;
+ 0452 F630                OR    #00110000B            ;
+ 0454 12                  LD    (DE),A                ;SAVE
+ 0455 23                  INC   HL                    ;ADJUST POINTERS
+ 0456 13                  INC   DE                    ;
+ 0457 7E                  LD    A,(HL)                ;LOAD FIRST BYTE
+ 0458 E60F                AND   #00001111B            ;
+ 045A F630                OR    #00110000B            ;
+ 045C 12                  LD    (DE),A                ;SAVE
+ 045D C9                  RET
+                ;*
+                ;KEYPAÄ TEST
+                ; SCANÓ 3² KEÙ KEYBOARÄ ANÄ RETURNÓ Á 1-3² OÒ ZERÏ IÎ KEYDATA
+                ;
+ 045E =         KEYSCANS: EQU   $
+ 045E 0610                LD    B,#00010000B           ;LOAD SCAN BIT MASK BYTE
+ 0460 3E00                LD    A,#00D                 ;ZERO A
+ 0462 320960              LD    (KEYDATA),A            ;
+ 0465 4F                  LD    C,A                    ;CLEAR KEY COUNT TO ZERO
+ 0466 3A0860    KEYSCAN0: LD    A,(LCDSCAN)            ;GET PORT DATA
+ 0469 E60F                AND   #00001111B             ;MASK IN ZERO'S
+ 046B B0                  OR    B                      ;ADD IN SCAN BYTE
+ 046C 320860              LD    (LCDSCAN),A            ;SAVE COPY
+ 046F D302                OUT   (SCAN),A               ;SEND SCAN TO PIO DEVICE
+ 0471 00                  NOP                          ;WAIT
+ 0472 00                  NOP                          ;
+ 0473 DB00                IN    A,(KEYIN)              ;READ KEY INPUTS
+ 0475 B7                  OR    A                      ;TEST
+ 0476 C28904              JP    NZ,KEYSCAN3            ;JUMP IF KEY DOWN
+ 0479 79        KEYSCAN1: LD    A,C                    ;ADJUST COUNT
+ 047A C608                ADD   A,#08D                 ;+8
+ 047C 4F                  LD    C,A                    ;SAVE NEW COUNT
+ 047D CB20                SLA   B                      ;SHIFT SCAN BYTE MASK
+ 047F C26604              JP    NZ,KEYSCAN0            ;LOOP IF NOT DONE YET
+ 0482 AF        KEYSCAN2: XOR   A                      ;CLEAR A
+ 0483 320960              LD    (KEYDATA),A            ;SAVE NO KEY
+ 0486 C39504              JP    KEYSCAN9               ;
+ 0489 0C        KEYSCAN3: INC   C                      ;BUMP COUNT
+ 048A CB3F                SRL   A                      ;SHIFT KEY INPUT RIGHT
+ 048C 20FB                JR    NZ,KEYSCAN3            ;LOOP UNTIL ZERO
+ 048E 79                  LD    A,C                    ;GET KEY COUNT
+ 048F 320960              LD    (KEYDATA),A            ;SAVE 
+ 0492 CD1B00              CALL  BEEP                   ;BEEP
+ 0495 3A0860    KEYSCAN9: LD    A,(LCDSCAN)            ;GET PORT DATA
+ 0498 E60F                AND   #00001111B             ;MASK IN ZERO'S
+ 049A 320860              LD    (LCDSCAN),A            ;SAVE COPY
+ 049D D302                OUT   (SCAN),A            ;SEND SCAN TO PIO DEVICE
+ 049F C9                  RET   
+                ;
+                ; LCD INITIALIZATION ROUTINE
+                ;
+ 04A0 =         LCDINITS: EQU   $
+ 04A0 213200              LD    HL,#50D                ;DELAY 15 MS
+ 04A3 CD0300              CALL  DELAY
+ 04A6 3E01                LD    A,#CLEAR               ;CLEAR DISPLAY
+ 04A8 CD1200              CALL  LCDCTRL                ;
+ 04AB 3E02                LD    A,#HOME                ;HOME CURSOR
+ 04AD CD1200              CALL  LCDCTRL                ;
+ 04B0 3E33                LD    A,#FUNC                ;SETUP LCD FUNCTIONS
+ 04B2 CD1200              CALL  LCDCTRL                ;
+ 04B5 3E06                LD    A,#SHIFT               ;SHIFT DISPLAY
+ 04B7 CD1200              CALL  LCDCTRL                ;
+ 04BA 3E0E                LD    A,#NORMAL              ;DISPLAY ON
+ 04BC CD1200              CALL  LCDCTRL                ;
+ 04BF C9                  RET
+                ;
+                ;CONTROL WORDS FOR LCD CONTROLLER 44780
+ 0001 =         CLEAR:    EQU   01H                    ;LCD CLEAR DISPLAY
+ 0002 =         HOME:     EQU   02H                    ;LCD HOME
+ 0033 =         FUNC:     EQU   00110011B              ;8 BIT/1 LINE/5X7
+ 0006 =         SHIFT:    EQU   00000110B              ;CURSOR SHIFT
+ 000E =         NORMAL:   EQU   00001110B              ;DISPLAY ON/WITH CURSOR/NO BLINK
+                ;
+                ; LCD CONTROL WORD WRITE
+                ; SET UP A WITH CONTROL WORD
+ 04C0 =         LCDCTRLS: EQU   $
+ 04C0 D301                OUT   (LCDDATA),A            ;SEND WORD TO DATA BUS
+ 04C2 3A0860              LD    A,(LCDSCAN)            ;GET CURRENT DATA
+ 04C5 E6F1                AND   #11110001B             ;ENABLE ON
+ 04C7 F602                OR    #00000010B             ;
+ 04C9 320860              LD    (LCDSCAN),A            ;SAVE
+ 04CC D302                OUT   (LCDCHIP),A            ;SEND TO PORT
+ 04CE E6F1                AND   #11110001B             ;ENABLE OFF
+ 04D0 320860              LD    (LCDSCAN),A            ;SAVE
+ 04D3 D302                OUT   (LCDCHIP),A            ;SEND TO PORT
+ 04D5 210200              LD    HL,#2D                 ;DELAY 2MS
+ 04D8 CD0300              CALL  DELAY                  ;
+ 04DB AF                  XOR   A                      ;ZERO DATA BUS
+ 04DC D301                OUT   (LCDDATA),A            ;
+ 04DE C9                  RET
+                ;
+                ; LCD DISPLAY DATA WRITE
+                ; SET UP A WITH DATA WORD
+ 04DF =         LCDCHARS: EQU   $
+ 04DF D301                OUT   (LCDDATA),A            ;SEND WORD TO DATA BUS
+ 04E1 3A0860              LD    A,(LCDSCAN)            ;GET CURRENT DATA
+ 04E4 E6F1                AND   #11110001B             ;ENABLE ON
+ 04E6 F608                OR    #00001000B             ;
+ 04E8 320860              LD    (LCDSCAN),A            ;SAVE
+ 04EB D302                OUT   (LCDCHIP),A            ;SEND TO PORT
+ 04ED F602                OR    #00000010B             ;
+ 04EF 320860              LD    (LCDSCAN),A            ;SAVE
+ 04F2 D302                OUT   (LCDCHIP),A            ;SEND TO PORT
+ 04F4 E6F1                AND   #11110001B             ;ENABLE OFF
+ 04F6 320860              LD    (LCDSCAN),A            ;SAVE
+ 04F9 D302                OUT   (LCDCHIP),A            ;SEND TO PORT
+ 04FB 210200              LD    HL,#2D                 ;DELAY 2MS
+ 04FE CD0300              CALL  DELAY                  ;
+ 0501 AF                  XOR   A                      ;ZERO DATA BUS
+ 0502 D301                OUT   (LCDDATA),A            ;
+ 0504 C9                  RET
+                ;
+                ; LCD HOME CURSOR ROUTINE
+                ;
+ 0505 =         LCDHOMES: EQU   $
+ 0505 3E02                LD    A,#HOME                ;HOME CURSOR
+ 0507 CD1200              CALL  LCDCTRL                ;
+ 050A C9                  RET
+                ;
+                ;BEEP GENERATION
+                ;
+ 050B =         BEEPS:    EQU   $
+ 050B 3A0860              LD    A,(LCDSCAN)            ;GET PORT DATA
+ 050E E6FE                AND   #11111110B             ;MASK IN ZERO'S
+ 0510 F601                OR    #00000001B             ;TURN ON BEEP
+ 0512 320860              LD    (LCDSCAN),A            ;SAVE COPY
+ 0515 D302                OUT   (SCAN),A               ;SEND SCAN TO PIO DEVICE
+ 0517 211E00              LD    HL,#BEEPTIME           ;LOAD DELAY
+ 051A CD0300              CALL  DELAY                  ;
+ 051D 3A0860              LD    A,(LCDSCAN)            ;GET PORT DATA
+ 0520 E6FE                AND   #11111110B             ;MASK IN ZERO'S
+ 0522 320860              LD    (LCDSCAN),A            ;SAVE COPY
+ 0525 D302                OUT   (SCAN),A               ;SEND SCAN TO PIO DEVICE
+ 0527 C9                  RET
+                ;
+                ;DISPLAY INFORMATION IN LCD BUFFER
+                ;
+ 0528 =         DISPLAYS: EQU   $
+ 0528 CD1800              CALL  LCDHOME                ;
+                ;SEND LCD BUFFER TO LCDDATA PORT BY CALLING LCDCHAR
+ 052B 3E28                LD    A,#40D                 ;LOAD BYTE COUNT
+ 052D 320A60              LD    (DIGNUM),A             ;
+ 0530 210B60              LD    HL,#LCDBUFF            ;POINT TO BUFFER
+ 0533 7E        DISP0:    LD    A,(HL)                 ;GET DATA
+ 0534 E5                  PUSH  HL
+ 0535 D5                  PUSH  DE 
+ 0536 CD1500              CALL  LCDCHAR                ;SEND OUT OT DISPLAY
+ 0539 D1                  POP   DE
+ 053A E1                  POP   HL
+ 053B 23                  INC   HL                     ;BUMP BUFFER POINTER
+ 053C 3A0A60              LD    A,(DIGNUM)             ;ADJUST COUNT
+ 053F 3D                  DEC   A                      ;
+ 0540 320A60              LD    (DIGNUM),A             ;SAVE NEW COUNT
+ 0543 B7                  OR    A
+ 0544 20ED                JR    NZ,DISP0               ;LOOP UNTIL DONE
+ 0546 C9                  RET                          ;RETURN
+                ;
+                ;DISPLAY MESS FROM MESSAGE TABLE IN FROM ROM0
+                ;LOAD A WITH MESSAGE #
+ 0547 =         DISPMESS: EQU   $
+ 0547 47                  LD    B,A                    ;GET MESSNUM IN B
+ 0548 216105              LD    HL,#MESSTBL            ;SET UP POINTER
+ 054B 112800              LD    DE,#040D               ;LOAD OFFSET
+ 054E 05                  DEC   B                      ;ADJUST COUNT SO 1=0
+ 054F 2804                JR    Z,MOVECHR              ;IF ZERO ALREADY JUMP OVER ADD
+ 0551 19        ADJUST:   ADD   HL,DE                  ;ADD OFFSET IN DE
+ 0552 05                  DEC   B                      ;
+ 0553 20FC                JR    NZ,ADJUST              ;
+ 0555 110B60    MOVECHR:  LD    DE,#LCDBUFF            ;SET POINTER TO DESTINATION
+ 0558 012800              LD    BC,#40D                ;LOAD BYTE COUNT
+ 055B EDB0                LDIR                         ;TRANSFER
+ 055D CD1E00              CALL  DISPLAY                ;
+ 0560 C9                  RET                          ;RETURN
+                ;
+ 0561 2D2D2D2D2DMESSTBL:  DFB   "------------Key Panel Tester------------"
+ 0589 2044657369          DFB   " Designed and Built by David Carl Boyce "
+ 05B1 4D65737361          DFB   "Message #: 3                            "
+ 05D9 4D65737361          DFB   "Message #: 4                            "
+ 0601 4D65737361          DFB   "Message #: 5                            "
+ 0629 4D65737361          DFB   "Message #: 6                            "
+ 0651 4D65737361          DFB   "Message #: 7                            "
+ 0679 4D65737361          DFB   "Message #: 8                            "
+ 06A1 4D65737361          DFB   "Message #: 9                            "
+ 06C9 4D65737361          DFB   "Message #:10                            "
+ 06F1 4D65737361          DFB   "Message #:11                            "
+ 0719 4D65737361          DFB   "Message #:12                            "
+ 0741 4D65737361          DFB   "Message #:13                            "
+ 0769 4D65737361          DFB   "Message #:14                            "
+ 0791 4D65737361          DFB   "Message #:15                            "
+ 07B9 4D65737361          DFB   "Message #:16                            "
+ 07E1 4D65737361          DFB   "Message #:17                            "
+ 0809 4D65737361          DFB   "Message #:18                            "
+ 0831 4D65737361          DFB   "Message #:19                            "
+ 0859 4D65737361          DFB   "Message #:20                            "
+ 0881 4D65737361          DFB   "Message #:21                            "
+ 08A9 4D65737361          DFB   "Message #:22                            "
+ 08D1 4D65737361          DFB   "Message #:23                            "
+ 08F9 4D65737361          DFB   "Message #:24                            "
+ 0921 4D65737361          DFB   "Message #:25                            "
+ 0949 4D65737361          DFB   "Message #:26                            "
+ 0971 4D65737361          DFB   "Message #:27                            "
+ 0999 4B6174686C          DFB   "Kathleen Louise Smith & David Carl Boyce"
+ 09C1 4D65737361          DFB   "Message #:29                            "
+ 09E9 4D65737361          DFB   "Message #:30                            "
+ 0A11 4D65737361          DFB   "Message #:31                            "
+ 0A39 4D65737361          DFB   "Message #:32                            "
+ 0000           END
+0007  A                    0018  ADCADDR              0148  ADCTEST       
+0551  ADJUST               6005  ASCDATA              0000  B             
+0009  BCDASC               0441  BCDASCS              6002  BCDDATA       
+001B  BEEP                 050B  BEEPS                001E  BEEPTIME      
+041C  BIN05                0427  BIN10                6001  BINARY        
+0006  BINBCD               040E  BINBCDS              0439  BTABL         
+0001  C                    0001  CLEAR                6000  CLOCK         
+0090  CW1                  0080  CW2                  0080  CW3           
+0002  D                    0180  DEFAULTS             0019  DEFNUM        
+0403  DEL05                0407  DEL10                0003  DELAY         
+0400  DELAYS               600A  DIGNUM               0533  DISP0         
+001E  DISPLAY              0528  DISPLAYS             0547  DISPMESS      
+0003  E                    0020  EXPAND               0033  FUNC          
+0004  H                    0002  HOME                 012F  INITPIO       
+0103  INTOFF               6009  KEYDATA              0000  KEYIN         
+000C  KEYSCAN              0466  KEYSCAN0             0479  KEYSCAN1      
+0482  KEYSCAN2             0489  KEYSCAN3             0495  KEYSCAN9      
+045E  KEYSCANS             0005  L                    600B  LCDBUFF       
+0015  LCDCHAR              04DF  LCDCHARS             0002  LCDCHIP       
+0012  LCDCTRL              04C0  LCDCTRLS             0001  LCDDATA       
+0018  LCDHOME              0505  LCDHOMES             000F  LCDINIT       
+04A0  LCDINITS             6008  LCDSCAN              0124  LOADRAM       
+0021  MESSAGE              0561  MESSTBL              0555  MOVECHR       
+0300  NMIHAND              000E  NORMAL               0003  PIO1CW        
+000B  PIO2CW               0013  PIO3CW               0008  PLUG1         
+000A  PLUG2                0009  PLUG3                0010  PLUG4         
+0012  PLUG5                0011  PLUG6                0205  PROG00        
+0233  PROG01               6000  RAM                  0120  RAMFAIL       
+617F  RAMTEST              0100  RESET                0002  SCAN          
+0006  SHIFT                8000  STACK                0200  START         
+0104  TESTRAM              6033  USERRAM              
+
