@@ -8,6 +8,10 @@ I uploaded this for people who do retro computing so they can make their .ASM fi
 
 I will try to find the manual for this old software
 
+I put a few of my programs in here to help people Z80APLUS.ASM & Z80APLUS.TXT
+
+Dont see your process here you can make your own XXX.TBL files to make them work 
+
 The .bat files show the command line use so look in there for help
 
 Anyone who uses this could you please send me a email at pcboardrepair@gmail.com or 256tb.hippocampus@gmail.com with any comments
